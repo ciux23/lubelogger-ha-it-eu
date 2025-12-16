@@ -28,9 +28,20 @@ This integration provides sensors for:
 
 4. Search for "LubeLogger" and follow the setup instructions
 
-### HACS Installation (Coming Soon)
+### HACS Installation
 
-This integration can be added to HACS for easier installation and updates.
+1. Go to **HACS** → **Integrations**
+2. Click the three dots menu (⋮) → **Custom repositories**
+3. Add this repository:
+   - **Repository**: `https://github.com/larry/lubelogger-ha`
+   - **Category**: Integration
+4. Click **Add**
+5. Search for "LubeLogger" in HACS
+6. Click **Download**
+7. Restart Home Assistant
+8. Follow the configuration steps below
+
+**Note**: If you get a version error, see [HACS_SETUP.md](HACS_SETUP.md) for troubleshooting.
 
 ## Configuration
 
