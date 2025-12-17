@@ -63,7 +63,8 @@ class LubeLoggerDataUpdateCoordinator(DataUpdateCoordinator):
             # Build device name from Make, Model, Year
             make = vehicle.get("Make") or vehicle.get("make") or ""
             model = vehicle.get("Model") or vehicle.get("model") or ""
-            year = vehicle.get("Year") or vehicle.get("year") or ""
+            year_val = vehicle.get("Year") or vehicle.get("year")
+            year = str(year_val) if year_val else ""
             
             name_parts = [part for part in [year, make, model] if part]
             device_name = " ".join(name_parts) if name_parts else vehicle.get("Name") or vehicle.get("name") or f"Vehicle {vehicle_id}"
