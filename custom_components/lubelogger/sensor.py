@@ -168,7 +168,7 @@ class LubeLoggerLatestTaxSensor(BaseLubeLoggerSensor):
             name="LubeLogger Latest Tax",
             unique_id="lubelogger_latest_tax",
             device_class=SensorDeviceClass.MONETARY,
-            state_class=SensorStateClass.MEASUREMENT,
+            state_class=None,
             unit="USD",
         )
 

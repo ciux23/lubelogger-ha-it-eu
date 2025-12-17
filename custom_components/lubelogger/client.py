@@ -63,14 +63,22 @@ class LubeLoggerClient:
         records = await self._async_request(API_TAX)
         if not isinstance(records, list) or not records:
             return None
-        return records[-1]
+
+        def sort_key(rec: dict[str, Any]) -> Any:
+            return rec.get("Id") or rec.get("id") or rec.get("Date") or rec.get("date") or 0
+
+        return sorted(records, key=sort_key)[-1]
 
     async def async_get_latest_service(self) -> dict[str, Any] | None:
         """Get the latest service record."""
         records = await self._async_request(API_SERVICE_RECORD)
         if not isinstance(records, list) or not records:
             return None
-        return records[-1]
+
+        def sort_key(rec: dict[str, Any]) -> Any:
+            return rec.get("Id") or rec.get("id") or rec.get("Date") or rec.get("date") or 0
+
+        return sorted(records, key=sort_key)[-1]
 
     async def _async_request(
         self, endpoint: str, method: str = "GET", **kwargs: Any
@@ -87,6 +95,10 @@ class LubeLoggerClient:
                 timeout=aiohttp.ClientTimeout(total=10),
                 **kwargs,
             ) as response:
+                if response.status == 404:
+                    # Endpoint not found; log as debug and return empty result
+                    _LOGGER.debug("Endpoint not found: %s", url)
+                    return []
                 response.raise_for_status()
                 if response.content_type == "application/json":
                     return await response.json()

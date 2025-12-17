@@ -14,9 +14,11 @@ DEFAULT_UPDATE_INTERVAL: Final = 300  # 5 minutes
 # The LubeLogger API is rooted at /api and exposes multiple resources.
 # See https://docs.lubelogger.com/Advanced/API for details.
 API_ROOT: Final = "/api"
-API_ODOMETER: Final = "/api/Odometer"
-API_PLAN: Final = "/api/Plan"
-API_TAX: Final = "/api/Tax"
-API_SERVICE_RECORD: Final = "/api/ServiceRecord"
+
+# Vehicle-scoped endpoints (all vehicles)
+API_ODOMETER: Final = "/api/vehicle/odometerrecords/all"
+API_PLAN: Final = "/api/vehicle/planrecords/all"
+API_TAX: Final = "/api/vehicle/taxrecords/all"
+API_SERVICE_RECORD: Final = "/api/vehicle/servicerecords/all"
 
 
