@@ -33,8 +33,10 @@ def parse_date(date_str: str | None) -> datetime | None:
     except (ValueError, AttributeError):
         pass
 
-    # Try common date formats
+    # Try common date formats (including MM/DD/YYYY from LubeLogger API)
     formats = [
+        "%m/%d/%Y",  # LubeLogger format: "12/17/2025"
+        "%m/%d/%Y %H:%M:%S",
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%dT%H:%M:%S.%f",
         "%Y-%m-%d %H:%M:%S",
@@ -158,13 +160,14 @@ class LubeLoggerLatestOdometerSensor(BaseLubeLoggerSensor):
         rec = self._record
         if not rec:
             return None
-        # Best-effort field guessing; adjust based on actual API fields.
-        return (
-            rec.get("Odometer")
-            or rec.get("odometer")
-            or rec.get("Value")
-            or rec.get("value")
-        )
+        # API returns lowercase 'odometer' field
+        odometer = rec.get("odometer") or rec.get("Odometer")
+        if odometer:
+            try:
+                return int(odometer)
+            except (ValueError, TypeError):
+                return odometer
+        return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -198,8 +201,8 @@ class LubeLoggerNextPlanSensor(BaseLubeLoggerSensor):
         if not rec:
             return None
 
-        # Try common field names for due date
-        for field in ("NextDueDate", "DueDate", "Date", "date"):
+        # API uses dateCreated or dateModified for plan records
+        for field in ("dateCreated", "dateModified", "Date", "date"):
             dt = parse_date(rec.get(field))
             if dt:
                 return dt
@@ -238,13 +241,14 @@ class LubeLoggerLatestTaxSensor(BaseLubeLoggerSensor):
         rec = self._record
         if not rec:
             return None
-        # Guess amount field
-        return (
-            rec.get("Amount")
-            or rec.get("amount")
-            or rec.get("Cost")
-            or rec.get("cost")
-        )
+        # API returns lowercase 'cost' field as string
+        cost = rec.get("cost") or rec.get("Cost")
+        if cost:
+            try:
+                return float(cost)
+            except (ValueError, TypeError):
+                return cost
+        return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -278,7 +282,8 @@ class LubeLoggerLatestServiceSensor(BaseLubeLoggerSensor):
         if not rec:
             return None
 
-        for field in ("ServiceDate", "Date", "date"):
+        # API uses lowercase 'date' field
+        for field in ("date", "Date", "ServiceDate"):
             dt = parse_date(rec.get(field))
             if dt:
                 return dt
