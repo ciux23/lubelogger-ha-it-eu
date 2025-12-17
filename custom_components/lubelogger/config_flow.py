@@ -32,23 +32,73 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     username = data[CONF_USERNAME]
     password = data[CONF_PASSWORD]
 
+    # Ensure URL has protocol
+    if not url.startswith(("http://", "https://")):
+        url = f"http://{url}"
+
     async with aiohttp.ClientSession() as session:
         try:
             # Try to authenticate and get vehicles list
-            async with session.get(
-                f"{url}/api/Vehicle/GetAllVehicles",
-                auth=aiohttp.BasicAuth(username, password),
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as response:
-                if response.status == 401:
-                    raise InvalidAuth
-                if response.status >= 400:
-                    raise CannotConnect
-                # If we get here, connection is successful
-                return {"title": f"LubeLogger ({url})"}
-        except aiohttp.ClientError as err:
-            _LOGGER.exception("Error connecting to LubeLogger: %s", err)
-            raise CannotConnect from err
+            # Try multiple possible endpoints
+            endpoints_to_try = [
+                "/api/Vehicle/GetAllVehicles",
+                "/api/Vehicle",
+                "/api/vehicles",
+                "/Vehicle/GetAllVehicles",
+            ]
+            
+            last_error = None
+            for endpoint in endpoints_to_try:
+                try:
+                    _LOGGER.debug("Trying endpoint: %s%s", url, endpoint)
+                    async with session.get(
+                        f"{url}{endpoint}",
+                        auth=aiohttp.BasicAuth(username, password),
+                        timeout=aiohttp.ClientTimeout(total=10),
+                        ssl=False,  # Allow self-signed certificates
+                    ) as response:
+                        _LOGGER.debug("Response status: %s for %s", response.status, endpoint)
+                        if response.status == 401:
+                            raise InvalidAuth
+                        if response.status == 200:
+                            # Success! Try to parse response
+                            try:
+                                data = await response.json()
+                                _LOGGER.debug("Successfully connected to LubeLogger")
+                                return {"title": f"LubeLogger ({url})"}
+                            except Exception:
+                                # Even if JSON parsing fails, 200 means we connected
+                                _LOGGER.debug("Connected but response not JSON")
+                                return {"title": f"LubeLogger ({url})"}
+                        elif response.status == 404:
+                            # Endpoint not found, try next one
+                            continue
+                        elif response.status >= 400:
+                            last_error = f"HTTP {response.status}"
+                            continue
+                except aiohttp.ClientConnectorError as err:
+                    _LOGGER.debug("Connection error for %s: %s", endpoint, err)
+                    last_error = str(err)
+                    continue
+                except aiohttp.ClientError as err:
+                    _LOGGER.debug("Client error for %s: %s", endpoint, err)
+                    last_error = str(err)
+                    continue
+            
+            # If we get here, none of the endpoints worked
+            if last_error:
+                _LOGGER.error("Failed to connect to LubeLogger: %s", last_error)
+                raise CannotConnect(f"Unable to connect: {last_error}")
+            else:
+                raise CannotConnect("Unable to connect: No valid endpoint found")
+                
+        except InvalidAuth:
+            raise
+        except CannotConnect:
+            raise
+        except Exception as err:
+            _LOGGER.exception("Unexpected error connecting to LubeLogger: %s", err)
+            raise CannotConnect(f"Connection error: {str(err)}") from err
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -90,6 +140,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class CannotConnect(HomeAssistantError):
     """Error to indicate we cannot connect."""
+    
+    def __init__(self, message: str = "Unable to connect to LubeLogger") -> None:
+        """Initialize the error."""
+        super().__init__(message)
+        self.message = message
 
 
 class InvalidAuth(HomeAssistantError):
