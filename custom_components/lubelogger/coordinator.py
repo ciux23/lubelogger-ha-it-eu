@@ -44,36 +44,69 @@ class LubeLoggerDataUpdateCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self) -> dict:
-        """Fetch data from LubeLogger."""
-        data: dict = {}
+        """Fetch data from LubeLogger, organized by vehicle."""
+        data: dict = {"vehicles": []}
 
-        # Latest odometer
+        # Get all vehicles
         try:
-            data["latest_odometer"] = await self.client.async_get_latest_odometer()
-        except Exception as err:  # pragma: no cover - defensive
-            _LOGGER.warning("Error fetching latest odometer: %s", err)
-            data["latest_odometer"] = None
+            vehicles = await self.client.async_get_vehicles()
+        except Exception as err:
+            _LOGGER.warning("Error fetching vehicles: %s", err)
+            return data
 
-        # Next planned item
-        try:
-            data["next_plan"] = await self.client.async_get_next_plan()
-        except Exception as err:  # pragma: no cover - defensive
-            _LOGGER.warning("Error fetching next plan item: %s", err)
-            data["next_plan"] = None
+        # For each vehicle, fetch its specific data
+        for vehicle in vehicles:
+            vehicle_id = vehicle.get("Id") or vehicle.get("id")
+            if not vehicle_id:
+                continue
 
-        # Latest tax
-        try:
-            data["latest_tax"] = await self.client.async_get_latest_tax()
-        except Exception as err:  # pragma: no cover - defensive
-            _LOGGER.warning("Error fetching latest tax record: %s", err)
-            data["latest_tax"] = None
+            vehicle_data = {
+                "id": vehicle_id,
+                "name": vehicle.get("Name") or vehicle.get("name") or f"Vehicle {vehicle_id}",
+                "vehicle_info": vehicle,
+            }
 
-        # Latest service record
-        try:
-            data["latest_service"] = await self.client.async_get_latest_service()
-        except Exception as err:  # pragma: no cover - defensive
-            _LOGGER.warning("Error fetching latest service record: %s", err)
-            data["latest_service"] = None
+            # Latest odometer for this vehicle
+            try:
+                vehicle_data["latest_odometer"] = await self.client.async_get_latest_odometer(
+                    vehicle_id
+                )
+            except Exception as err:
+                _LOGGER.warning(
+                    "Error fetching latest odometer for vehicle %s: %s", vehicle_id, err
+                )
+                vehicle_data["latest_odometer"] = None
+
+            # Next planned item for this vehicle
+            try:
+                vehicle_data["next_plan"] = await self.client.async_get_next_plan(vehicle_id)
+            except Exception as err:
+                _LOGGER.warning(
+                    "Error fetching next plan for vehicle %s: %s", vehicle_id, err
+                )
+                vehicle_data["next_plan"] = None
+
+            # Latest tax for this vehicle
+            try:
+                vehicle_data["latest_tax"] = await self.client.async_get_latest_tax(vehicle_id)
+            except Exception as err:
+                _LOGGER.warning(
+                    "Error fetching latest tax for vehicle %s: %s", vehicle_id, err
+                )
+                vehicle_data["latest_tax"] = None
+
+            # Latest service record for this vehicle
+            try:
+                vehicle_data["latest_service"] = await self.client.async_get_latest_service(
+                    vehicle_id
+                )
+            except Exception as err:
+                _LOGGER.warning(
+                    "Error fetching latest service for vehicle %s: %s", vehicle_id, err
+                )
+                vehicle_data["latest_service"] = None
+
+            data["vehicles"].append(vehicle_data)
 
         return data
 

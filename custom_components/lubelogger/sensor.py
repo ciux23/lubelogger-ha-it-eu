@@ -11,10 +11,12 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
+from .const import DOMAIN
 from .coordinator import LubeLoggerDataUpdateCoordinator
 
 
@@ -58,53 +60,83 @@ async def async_setup_entry(
         entry.entry_id
     ]
 
-    sensors: list[SensorEntity] = [
-        LubeLoggerLatestOdometerSensor(coordinator),
-        LubeLoggerNextPlanSensor(coordinator),
-        LubeLoggerLatestTaxSensor(coordinator),
-        LubeLoggerLatestServiceSensor(coordinator),
-    ]
+    sensors: list[SensorEntity] = []
+    vehicles = coordinator.data.get("vehicles", [])
+
+    for vehicle in vehicles:
+        vehicle_id = vehicle.get("id")
+        vehicle_name = vehicle.get("name", f"Vehicle {vehicle_id}")
+
+        sensors.extend(
+            [
+                LubeLoggerLatestOdometerSensor(coordinator, vehicle_id, vehicle_name),
+                LubeLoggerNextPlanSensor(coordinator, vehicle_id, vehicle_name),
+                LubeLoggerLatestTaxSensor(coordinator, vehicle_id, vehicle_name),
+                LubeLoggerLatestServiceSensor(coordinator, vehicle_id, vehicle_name),
+            ]
+        )
 
     async_add_entities(sensors)
 
 
 class BaseLubeLoggerSensor(CoordinatorEntity, SensorEntity):
-    """Base sensor that reads a key from coordinator data."""
+    """Base sensor that reads a key from coordinator data for a specific vehicle."""
 
     def __init__(
         self,
         coordinator: LubeLoggerDataUpdateCoordinator,
+        vehicle_id: int,
+        vehicle_name: str,
         key: str,
-        name: str,
-        unique_id: str,
+        sensor_name: str,
+        unique_id_suffix: str,
         device_class: SensorDeviceClass | None = None,
         state_class: SensorStateClass | None = None,
         unit: str | None = None,
     ) -> None:
         super().__init__(coordinator)
+        self._vehicle_id = vehicle_id
+        self._vehicle_name = vehicle_name
         self._key = key
-        self._attr_name = name
-        self._attr_unique_id = unique_id
+        self._attr_name = f"{vehicle_name} {sensor_name}"
+        self._attr_unique_id = f"lubelogger_{vehicle_id}_{unique_id_suffix}"
         self._attr_device_class = device_class
         self._attr_state_class = state_class
         self._attr_native_unit_of_measurement = unit
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(vehicle_id))},
+            name=vehicle_name,
+            manufacturer="LubeLogger",
+            model=vehicle_name,
+        )
 
     @property
     def _record(self) -> dict | None:
         data = self.coordinator.data or {}
-        rec = data.get(self._key)
-        return rec if isinstance(rec, dict) else None
+        vehicles = data.get("vehicles", [])
+        for vehicle in vehicles:
+            if vehicle.get("id") == self._vehicle_id:
+                rec = vehicle.get(self._key)
+                return rec if isinstance(rec, dict) else None
+        return None
 
 
 class LubeLoggerLatestOdometerSensor(BaseLubeLoggerSensor):
     """Sensor for latest odometer value."""
 
-    def __init__(self, coordinator: LubeLoggerDataUpdateCoordinator) -> None:
+    def __init__(
+        self,
+        coordinator: LubeLoggerDataUpdateCoordinator,
+        vehicle_id: int,
+        vehicle_name: str,
+    ) -> None:
         super().__init__(
             coordinator,
+            vehicle_id,
+            vehicle_name,
             key="latest_odometer",
-            name="LubeLogger Latest Odometer",
-            unique_id="lubelogger_latest_odometer",
+            sensor_name="Latest Odometer",
+            unique_id_suffix="latest_odometer",
             device_class=SensorDeviceClass.DISTANCE,
             state_class=SensorStateClass.MEASUREMENT,
             unit="km",
@@ -131,12 +163,19 @@ class LubeLoggerLatestOdometerSensor(BaseLubeLoggerSensor):
 class LubeLoggerNextPlanSensor(BaseLubeLoggerSensor):
     """Sensor for next planned item from Plan endpoint."""
 
-    def __init__(self, coordinator: LubeLoggerDataUpdateCoordinator) -> None:
+    def __init__(
+        self,
+        coordinator: LubeLoggerDataUpdateCoordinator,
+        vehicle_id: int,
+        vehicle_name: str,
+    ) -> None:
         super().__init__(
             coordinator,
+            vehicle_id,
+            vehicle_name,
             key="next_plan",
-            name="LubeLogger Next Plan",
-            unique_id="lubelogger_next_plan",
+            sensor_name="Next Plan",
+            unique_id_suffix="next_plan",
             device_class=SensorDeviceClass.TIMESTAMP,
         )
 
@@ -161,12 +200,19 @@ class LubeLoggerNextPlanSensor(BaseLubeLoggerSensor):
 class LubeLoggerLatestTaxSensor(BaseLubeLoggerSensor):
     """Sensor for latest tax record."""
 
-    def __init__(self, coordinator: LubeLoggerDataUpdateCoordinator) -> None:
+    def __init__(
+        self,
+        coordinator: LubeLoggerDataUpdateCoordinator,
+        vehicle_id: int,
+        vehicle_name: str,
+    ) -> None:
         super().__init__(
             coordinator,
+            vehicle_id,
+            vehicle_name,
             key="latest_tax",
-            name="LubeLogger Latest Tax",
-            unique_id="lubelogger_latest_tax",
+            sensor_name="Latest Tax",
+            unique_id_suffix="latest_tax",
             device_class=SensorDeviceClass.MONETARY,
             state_class=None,
             unit="USD",
@@ -193,12 +239,19 @@ class LubeLoggerLatestTaxSensor(BaseLubeLoggerSensor):
 class LubeLoggerLatestServiceSensor(BaseLubeLoggerSensor):
     """Sensor for latest service record."""
 
-    def __init__(self, coordinator: LubeLoggerDataUpdateCoordinator) -> None:
+    def __init__(
+        self,
+        coordinator: LubeLoggerDataUpdateCoordinator,
+        vehicle_id: int,
+        vehicle_name: str,
+    ) -> None:
         super().__init__(
             coordinator,
+            vehicle_id,
+            vehicle_name,
             key="latest_service",
-            name="LubeLogger Latest Service",
-            unique_id="lubelogger_latest_service",
+            sensor_name="Latest Service",
+            unique_id_suffix="latest_service",
             device_class=SensorDeviceClass.TIMESTAMP,
         )
 
