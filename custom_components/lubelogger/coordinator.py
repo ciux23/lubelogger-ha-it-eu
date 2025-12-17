@@ -45,12 +45,35 @@ class LubeLoggerDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict:
         """Fetch data from LubeLogger."""
+        data: dict = {}
+
+        # Latest odometer
         try:
-            # For now, just verify connectivity and return an empty data structure.
-            # Once specific endpoints are mapped (e.g. Odometer, Fuel), this method
-            # can be extended to fetch and structure real data.
-            vehicles = await self.client.async_get_vehicles()
-            return {"vehicles": vehicles}
-        except Exception as err:
-            raise UpdateFailed(f"Error communicating with LubeLogger: {err}") from err
+            data["latest_odometer"] = await self.client.async_get_latest_odometer()
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.warning("Error fetching latest odometer: %s", err)
+            data["latest_odometer"] = None
+
+        # Next planned item
+        try:
+            data["next_plan"] = await self.client.async_get_next_plan()
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.warning("Error fetching next plan item: %s", err)
+            data["next_plan"] = None
+
+        # Latest tax
+        try:
+            data["latest_tax"] = await self.client.async_get_latest_tax()
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.warning("Error fetching latest tax record: %s", err)
+            data["latest_tax"] = None
+
+        # Latest service record
+        try:
+            data["latest_service"] = await self.client.async_get_latest_service()
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.warning("Error fetching latest service record: %s", err)
+            data["latest_service"] = None
+
+        return data
 

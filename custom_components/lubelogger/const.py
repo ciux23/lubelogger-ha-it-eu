@@ -11,10 +11,12 @@ CONF_UPDATE_INTERVAL: Final = "update_interval"
 DEFAULT_UPDATE_INTERVAL: Final = 300  # 5 minutes
 
 # API endpoints
-# The LubeLogger API is rooted at /api and exposes multiple resources such as
-# Odometer, Fuel, ServiceRecord, etc. Full docs are at /api.
-# For now we only ping the root to verify connectivity; detailed endpoints
-# can be wired up later once the desired data model is decided.
+# The LubeLogger API is rooted at /api and exposes multiple resources.
+# See https://docs.lubelogger.com/Advanced/API for details.
 API_ROOT: Final = "/api"
+API_ODOMETER: Final = "/api/Odometer"
+API_PLAN: Final = "/api/Plan"
+API_TAX: Final = "/api/Tax"
+API_SERVICE_RECORD: Final = "/api/ServiceRecord"
 
 

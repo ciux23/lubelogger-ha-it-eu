@@ -22,16 +22,15 @@ def parse_date(date_str: str | None) -> datetime | None:
     """Parse a date string from LubeLogger API."""
     if not date_str:
         return None
-    
+
     # Try ISO format first
     try:
-        # Handle Z suffix and convert to UTC
         if date_str.endswith("Z"):
             date_str = date_str.replace("Z", "+00:00")
         return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         pass
-    
+
     # Try common date formats
     formats = [
         "%Y-%m-%dT%H:%M:%S",
@@ -39,13 +38,13 @@ def parse_date(date_str: str | None) -> datetime | None:
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d",
     ]
-    
+
     for fmt in formats:
         try:
             return datetime.strptime(date_str, fmt)
         except (ValueError, AttributeError):
             continue
-    
+
     return None
 
 
@@ -59,247 +58,162 @@ async def async_setup_entry(
         entry.entry_id
     ]
 
-    sensors = []
-    vehicles = coordinator.data.get("vehicles", [])
-
-    for vehicle in vehicles:
-        vehicle_id = vehicle.get("id")
-        vehicle_name = vehicle.get("name", f"Vehicle {vehicle_id}")
-
-        # Vehicle statistics sensors
-        stats = vehicle.get("statistics", {})
-        if stats:
-            sensors.append(
-                LubeLoggerSensor(
-                    coordinator,
-                    vehicle_id,
-                    vehicle_name,
-                    "total_miles",
-                    "Total Miles",
-                    "miles",
-                    SensorDeviceClass.DISTANCE,
-                    SensorStateClass.TOTAL_INCREASING,
-                )
-            )
-            sensors.append(
-                LubeLoggerSensor(
-                    coordinator,
-                    vehicle_id,
-                    vehicle_name,
-                    "average_mpg",
-                    "Average MPG",
-                    "mpg",
-                    None,
-                    SensorStateClass.MEASUREMENT,
-                )
-            )
-            sensors.append(
-                LubeLoggerSensor(
-                    coordinator,
-                    vehicle_id,
-                    vehicle_name,
-                    "total_fuel_cost",
-                    "Total Fuel Cost",
-                    "USD",
-                    SensorDeviceClass.MONETARY,
-                    SensorStateClass.TOTAL_INCREASING,
-                )
-            )
-
-        # Maintenance sensors
-        maintenance = vehicle.get("maintenance", [])
-        if maintenance:
-            # Next maintenance due
-            sensors.append(
-                LubeLoggerMaintenanceSensor(
-                    coordinator,
-                    vehicle_id,
-                    vehicle_name,
-                    "next_maintenance",
-                    "Next Maintenance Due",
-                )
-            )
-            # Last maintenance date
-            sensors.append(
-                LubeLoggerMaintenanceSensor(
-                    coordinator,
-                    vehicle_id,
-                    vehicle_name,
-                    "last_maintenance",
-                    "Last Maintenance",
-                )
-            )
-
-        # Fuel sensors
-        fuel = vehicle.get("fuel", [])
-        if fuel:
-            # Last fuel fill date
-            sensors.append(
-                LubeLoggerFuelSensor(
-                    coordinator,
-                    vehicle_id,
-                    vehicle_name,
-                    "last_fuel_fill",
-                    "Last Fuel Fill",
-                )
-            )
-            # Last fuel price
-            sensors.append(
-                LubeLoggerFuelSensor(
-                    coordinator,
-                    vehicle_id,
-                    vehicle_name,
-                    "last_fuel_price",
-                    "Last Fuel Price",
-                    SensorDeviceClass.MONETARY,
-                )
-            )
+    sensors: list[SensorEntity] = [
+        LubeLoggerLatestOdometerSensor(coordinator),
+        LubeLoggerNextPlanSensor(coordinator),
+        LubeLoggerLatestTaxSensor(coordinator),
+        LubeLoggerLatestServiceSensor(coordinator),
+    ]
 
     async_add_entities(sensors)
 
 
-class LubeLoggerSensor(CoordinatorEntity, SensorEntity):
-    """Base sensor for LubeLogger vehicle data."""
+class BaseLubeLoggerSensor(CoordinatorEntity, SensorEntity):
+    """Base sensor that reads a key from coordinator data."""
 
     def __init__(
         self,
         coordinator: LubeLoggerDataUpdateCoordinator,
-        vehicle_id: int,
-        vehicle_name: str,
-        sensor_key: str,
-        sensor_name: str,
-        unit: str | None,
+        key: str,
+        name: str,
+        unique_id: str,
         device_class: SensorDeviceClass | None = None,
         state_class: SensorStateClass | None = None,
+        unit: str | None = None,
     ) -> None:
-        """Initialize the sensor."""
         super().__init__(coordinator)
-        self._vehicle_id = vehicle_id
-        self._vehicle_name = vehicle_name
-        self._sensor_key = sensor_key
-        self._attr_name = f"{vehicle_name} {sensor_name}"
-        self._attr_unique_id = f"lubelogger_{vehicle_id}_{sensor_key}"
-        self._attr_native_unit_of_measurement = unit
+        self._key = key
+        self._attr_name = name
+        self._attr_unique_id = unique_id
         self._attr_device_class = device_class
         self._attr_state_class = state_class
+        self._attr_native_unit_of_measurement = unit
+
+    @property
+    def _record(self) -> dict | None:
+        data = self.coordinator.data or {}
+        rec = data.get(self._key)
+        return rec if isinstance(rec, dict) else None
+
+
+class LubeLoggerLatestOdometerSensor(BaseLubeLoggerSensor):
+    """Sensor for latest odometer value."""
+
+    def __init__(self, coordinator: LubeLoggerDataUpdateCoordinator) -> None:
+        super().__init__(
+            coordinator,
+            key="latest_odometer",
+            name="LubeLogger Latest Odometer",
+            unique_id="lubelogger_latest_odometer",
+            device_class=SensorDeviceClass.DISTANCE,
+            state_class=SensorStateClass.MEASUREMENT,
+            unit="km",
+        )
 
     @property
     def native_value(self) -> Any:
-        """Return the state of the sensor."""
-        vehicles = self.coordinator.data.get("vehicles", [])
-        for vehicle in vehicles:
-            if vehicle.get("id") == self._vehicle_id:
-                stats = vehicle.get("statistics", {})
-                return stats.get(self._sensor_key)
+        rec = self._record
+        if not rec:
+            return None
+        # Best-effort field guessing; adjust based on actual API fields.
+        return (
+            rec.get("Odometer")
+            or rec.get("odometer")
+            or rec.get("Value")
+            or rec.get("value")
+        )
 
-        return None
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        return self._record or None
 
 
-class LubeLoggerMaintenanceSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for maintenance records."""
+class LubeLoggerNextPlanSensor(BaseLubeLoggerSensor):
+    """Sensor for next planned item from Plan endpoint."""
 
-    def __init__(
-        self,
-        coordinator: LubeLoggerDataUpdateCoordinator,
-        vehicle_id: int,
-        vehicle_name: str,
-        sensor_type: str,
-        sensor_name: str,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._vehicle_id = vehicle_id
-        self._vehicle_name = vehicle_name
-        self._sensor_type = sensor_type
-        self._attr_name = f"{vehicle_name} {sensor_name}"
-        self._attr_unique_id = f"lubelogger_{vehicle_id}_{sensor_type}"
-        self._attr_device_class = SensorDeviceClass.TIMESTAMP
+    def __init__(self, coordinator: LubeLoggerDataUpdateCoordinator) -> None:
+        super().__init__(
+            coordinator,
+            key="next_plan",
+            name="LubeLogger Next Plan",
+            unique_id="lubelogger_next_plan",
+            device_class=SensorDeviceClass.TIMESTAMP,
+        )
 
     @property
     def native_value(self) -> datetime | None:
-        """Return the state of the sensor."""
-        vehicles = self.coordinator.data.get("vehicles", [])
-        for vehicle in vehicles:
-            if vehicle.get("id") == self._vehicle_id:
-                maintenance = vehicle.get("maintenance", [])
-                if not maintenance:
-                    return None
+        rec = self._record
+        if not rec:
+            return None
 
-                if self._sensor_type == "next_maintenance":
-                    # Find the next upcoming maintenance
-                    now = dt_util.now()
-                    upcoming = []
-                    for m in maintenance:
-                        date_obj = parse_date(m.get("date"))
-                        if date_obj and date_obj > now:
-                            upcoming.append((m, date_obj))
-                    
-                    if upcoming:
-                        next_maint, _ = min(upcoming, key=lambda x: x[1])
-                        return parse_date(next_maint.get("date"))
-                elif self._sensor_type == "last_maintenance":
-                    # Find the most recent maintenance
-                    past = []
-                    for m in maintenance:
-                        date_obj = parse_date(m.get("date"))
-                        if date_obj and date_obj <= now:
-                            past.append((m, date_obj))
-                    
-                    if past:
-                        last_maint, _ = max(past, key=lambda x: x[1])
-                        return parse_date(last_maint.get("date"))
-
+        # Try common field names for due date
+        for field in ("NextDueDate", "DueDate", "Date", "date"):
+            dt = parse_date(rec.get(field))
+            if dt:
+                return dt
         return None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        return self._record or None
 
-class LubeLoggerFuelSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for fuel records."""
 
-    def __init__(
-        self,
-        coordinator: LubeLoggerDataUpdateCoordinator,
-        vehicle_id: int,
-        vehicle_name: str,
-        sensor_type: str,
-        sensor_name: str,
-        device_class: SensorDeviceClass | None = None,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._vehicle_id = vehicle_id
-        self._vehicle_name = vehicle_name
-        self._sensor_type = sensor_type
-        self._attr_name = f"{vehicle_name} {sensor_name}"
-        self._attr_unique_id = f"lubelogger_{vehicle_id}_{sensor_type}"
-        self._attr_device_class = device_class
+class LubeLoggerLatestTaxSensor(BaseLubeLoggerSensor):
+    """Sensor for latest tax record."""
+
+    def __init__(self, coordinator: LubeLoggerDataUpdateCoordinator) -> None:
+        super().__init__(
+            coordinator,
+            key="latest_tax",
+            name="LubeLogger Latest Tax",
+            unique_id="lubelogger_latest_tax",
+            device_class=SensorDeviceClass.MONETARY,
+            state_class=SensorStateClass.MEASUREMENT,
+            unit="USD",
+        )
 
     @property
     def native_value(self) -> Any:
-        """Return the state of the sensor."""
-        vehicles = self.coordinator.data.get("vehicles", [])
-        for vehicle in vehicles:
-            if vehicle.get("id") == self._vehicle_id:
-                fuel = vehicle.get("fuel", [])
-                if not fuel:
-                    return None
+        rec = self._record
+        if not rec:
+            return None
+        # Guess amount field
+        return (
+            rec.get("Amount")
+            or rec.get("amount")
+            or rec.get("Cost")
+            or rec.get("cost")
+        )
 
-                # Sort by date, most recent first
-                fuel_with_dates = []
-                for f in fuel:
-                    date_obj = parse_date(f.get("date"))
-                    if date_obj:
-                        fuel_with_dates.append((f, date_obj))
-                
-                if fuel_with_dates:
-                    fuel_with_dates.sort(key=lambda x: x[1], reverse=True)
-                    last_fuel = fuel_with_dates[0][0]
-                    
-                    if self._sensor_type == "last_fuel_fill":
-                        self._attr_device_class = SensorDeviceClass.TIMESTAMP
-                        return parse_date(last_fuel.get("date"))
-                    elif self._sensor_type == "last_fuel_price":
-                        self._attr_native_unit_of_measurement = "USD"
-                        return last_fuel.get("costPerGallon") or last_fuel.get("price")
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        return self._record or None
 
+
+class LubeLoggerLatestServiceSensor(BaseLubeLoggerSensor):
+    """Sensor for latest service record."""
+
+    def __init__(self, coordinator: LubeLoggerDataUpdateCoordinator) -> None:
+        super().__init__(
+            coordinator,
+            key="latest_service",
+            name="LubeLogger Latest Service",
+            unique_id="lubelogger_latest_service",
+            device_class=SensorDeviceClass.TIMESTAMP,
+        )
+
+    @property
+    def native_value(self) -> datetime | None:
+        rec = self._record
+        if not rec:
+            return None
+
+        for field in ("ServiceDate", "Date", "date"):
+            dt = parse_date(rec.get(field))
+            if dt:
+                return dt
         return None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        return self._record or None
