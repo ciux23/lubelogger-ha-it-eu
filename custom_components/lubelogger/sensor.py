@@ -21,7 +21,7 @@ from .coordinator import LubeLoggerDataUpdateCoordinator
 
 
 def parse_date(date_str: str | None) -> datetime | None:
-    """Parse a date string from LubeLogger API."""
+    """Parse a date string from LubeLogger API and return timezone-aware datetime."""
     if not date_str:
         return None
 
@@ -29,7 +29,11 @@ def parse_date(date_str: str | None) -> datetime | None:
     try:
         if date_str.endswith("Z"):
             date_str = date_str.replace("Z", "+00:00")
-        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        # Ensure timezone-aware
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=dt_util.UTC)
+        return dt
     except (ValueError, AttributeError):
         pass
 
@@ -45,7 +49,11 @@ def parse_date(date_str: str | None) -> datetime | None:
 
     for fmt in formats:
         try:
-            return datetime.strptime(date_str, fmt)
+            dt = datetime.strptime(date_str, fmt)
+            # Make timezone-aware (assume local timezone)
+            if dt.tzinfo is None:
+                dt = dt_util.as_local(dt)
+            return dt
         except (ValueError, AttributeError):
             continue
 
