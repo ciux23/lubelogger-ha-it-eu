@@ -44,7 +44,7 @@ def parse_date(date_str: str | None) -> datetime | None:
         "%m/%d/%Y",           # US format (fallback)
         "%m/%d/%Y %H:%M:%S",  # US format with time (fallback)
         "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-dT%H:%M:%S.%f",
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d",
     ]
@@ -233,6 +233,9 @@ async def async_setup_entry(
 class BaseLubeLoggerSensor(CoordinatorEntity, SensorEntity):
     """Base sensor that reads a key from coordinator data for a specific vehicle."""
 
+    # This tells HA to generate the entity name using the device name + translation
+    _attr_has_entity_name = True
+
     def __init__(
         self,
         coordinator: LubeLoggerDataUpdateCoordinator,
@@ -240,7 +243,7 @@ class BaseLubeLoggerSensor(CoordinatorEntity, SensorEntity):
         vehicle_name: str,
         vehicle_info: dict,
         key: str,
-        sensor_name: str,
+        translation_key: str,
         unique_id_suffix: str,
         device_class: SensorDeviceClass | None = None,
         state_class: SensorStateClass | None = None,
@@ -250,7 +253,7 @@ class BaseLubeLoggerSensor(CoordinatorEntity, SensorEntity):
         self._vehicle_id = vehicle_id
         self._vehicle_name = vehicle_name
         self._key = key
-        self._attr_name = f"{vehicle_name} {sensor_name}"
+        self._attr_translation_key = translation_key
         self._attr_unique_id = f"lubelogger_{vehicle_id}_{unique_id_suffix}"
         self._attr_device_class = device_class
         self._attr_state_class = state_class
@@ -296,12 +299,12 @@ class LubeLoggerLatestOdometerSensor(BaseLubeLoggerSensor):
         vehicle_info: dict,
     ) -> None:
         super().__init__(
-            coordinator,
-            vehicle_id,
-            vehicle_name,
-            vehicle_info,
+            coordinator=coordinator,
+            vehicle_id=vehicle_id,
+            vehicle_name=vehicle_name,
+            vehicle_info=vehicle_info,
             key="latest_odometer",
-            sensor_name="Latest Odometer",
+            translation_key="latest_odometer",
             unique_id_suffix="latest_odometer",
             device_class=SensorDeviceClass.DISTANCE,
             state_class=SensorStateClass.MEASUREMENT,
@@ -360,12 +363,12 @@ class LubeLoggerNextPlanSensor(BaseLubeLoggerSensor):
         vehicle_info: dict,
     ) -> None:
         super().__init__(
-            coordinator,
-            vehicle_id,
-            vehicle_name,
-            vehicle_info,
+            coordinator=coordinator,
+            vehicle_id=vehicle_id,
+            vehicle_name=vehicle_name,
+            vehicle_info=vehicle_info,
             key="next_plan",
-            sensor_name="Next Plan",
+            translation_key="next_plan",
             unique_id_suffix="next_plan",
             device_class=SensorDeviceClass.TIMESTAMP,
         )
@@ -422,12 +425,12 @@ class LubeLoggerLatestTaxSensor(BaseLubeLoggerSensor):
         vehicle_info: dict,
     ) -> None:
         super().__init__(
-            coordinator,
-            vehicle_id,
-            vehicle_name,
-            vehicle_info,
+            coordinator=coordinator,
+            vehicle_id=vehicle_id,
+            vehicle_name=vehicle_name,
+            vehicle_info=vehicle_info,
             key="latest_tax",
-            sensor_name="Latest Tax",
+            translation_key="latest_tax",
             unique_id_suffix="latest_tax",
             device_class=SensorDeviceClass.MONETARY,
             state_class=None,
@@ -485,12 +488,12 @@ class LubeLoggerLatestServiceSensor(BaseLubeLoggerSensor):
         vehicle_info: dict,
     ) -> None:
         super().__init__(
-            coordinator,
-            vehicle_id,
-            vehicle_name,
-            vehicle_info,
+            coordinator=coordinator,
+            vehicle_id=vehicle_id,
+            vehicle_name=vehicle_name,
+            vehicle_info=vehicle_info,
             key="latest_service",
-            sensor_name="Last Service",
+            translation_key="latest_service",
             unique_id_suffix="latest_service",
             device_class=SensorDeviceClass.TIMESTAMP,
         )
@@ -547,12 +550,12 @@ class LubeLoggerLatestRepairSensor(BaseLubeLoggerSensor):
         vehicle_info: dict,
     ) -> None:
         super().__init__(
-            coordinator,
-            vehicle_id,
-            vehicle_name,
-            vehicle_info,
+            coordinator=coordinator,
+            vehicle_id=vehicle_id,
+            vehicle_name=vehicle_name,
+            vehicle_info=vehicle_info,
             key="latest_repair",
-            sensor_name="Last Repair",
+            translation_key="latest_repair",
             unique_id_suffix="latest_repair",
             device_class=SensorDeviceClass.TIMESTAMP,
         )
@@ -609,12 +612,12 @@ class LubeLoggerLatestUpgradeSensor(BaseLubeLoggerSensor):
         vehicle_info: dict,
     ) -> None:
         super().__init__(
-            coordinator,
-            vehicle_id,
-            vehicle_name,
-            vehicle_info,
+            coordinator=coordinator,
+            vehicle_id=vehicle_id,
+            vehicle_name=vehicle_name,
+            vehicle_info=vehicle_info,
             key="latest_upgrade",
-            sensor_name="Last Upgrade",
+            translation_key="latest_upgrade",
             unique_id_suffix="latest_upgrade",
             device_class=SensorDeviceClass.TIMESTAMP,
         )
@@ -671,12 +674,12 @@ class LubeLoggerLatestSupplySensor(BaseLubeLoggerSensor):
         vehicle_info: dict,
     ) -> None:
         super().__init__(
-            coordinator,
-            vehicle_id,
-            vehicle_name,
-            vehicle_info,
+            coordinator=coordinator,
+            vehicle_id=vehicle_id,
+            vehicle_name=vehicle_name,
+            vehicle_info=vehicle_info,
             key="latest_supply",
-            sensor_name="Last Supply",
+            translation_key="latest_supply",
             unique_id_suffix="latest_supply",
             device_class=SensorDeviceClass.TIMESTAMP,
         )
@@ -733,12 +736,12 @@ class LubeLoggerLatestGasSensor(BaseLubeLoggerSensor):
         vehicle_info: dict,
     ) -> None:
         super().__init__(
-            coordinator,
-            vehicle_id,
-            vehicle_name,
-            vehicle_info,
+            coordinator=coordinator,
+            vehicle_id=vehicle_id,
+            vehicle_name=vehicle_name,
+            vehicle_info=vehicle_info,
             key="latest_gas",
-            sensor_name="Last Refuel",
+            translation_key="latest_gas",
             unique_id_suffix="latest_gas",
             device_class=SensorDeviceClass.TIMESTAMP,
         )
@@ -836,12 +839,12 @@ class LubeLoggerNextReminderSensor(BaseLubeLoggerSensor):
         vehicle_info: dict,
     ) -> None:
         super().__init__(
-            coordinator,
-            vehicle_id,
-            vehicle_name,
-            vehicle_info,
+            coordinator=coordinator,
+            vehicle_id=vehicle_id,
+            vehicle_name=vehicle_name,
+            vehicle_info=vehicle_info,
             key="next_reminder",
-            sensor_name="Next Reminder",
+            translation_key="next_reminder",
             unique_id_suffix="next_reminder",
             device_class=SensorDeviceClass.TIMESTAMP,
         )
