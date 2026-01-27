@@ -37,12 +37,14 @@ def parse_date(date_str: str | None) -> datetime | None:
     except (ValueError, AttributeError):
         pass
 
-    # Try common date formats (including MM/DD/YYYY from LubeLogger API)
+    # EUROPEAN FORMAT FIRST (for European servers)
     formats = [
-        "%m/%d/%Y",  # LubeLogger format: "12/17/2025"
-        "%m/%d/%Y %H:%M:%S",
+        "%d/%m/%Y",           # European format: "28/02/2027"
+        "%d/%m/%Y %H:%M:%S",  # European with time
+        "%m/%d/%Y",           # US format (fallback)
+        "%m/%d/%Y %H:%M:%S",  # US with time (fallback)
         "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-dT%H:%M:%S.%f",
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d",
     ]
@@ -58,6 +60,73 @@ def parse_date(date_str: str | None) -> datetime | None:
             continue
 
     return None
+
+
+def convert_european_number(number_str: Any) -> float | int | str:
+    """Convert European number format (1.234,56) to Python float/int."""
+    if not number_str:
+        return None
+    
+    if isinstance(number_str, (int, float)):
+        return number_str
+    
+    if isinstance(number_str, str):
+        # Remove currency symbols
+        number_str = number_str.replace('€', '').replace('$', '').replace('£', '').strip()
+        
+        # Handle European format: dot = thousand separator, comma = decimal
+        if ',' in number_str and '.' in number_str:
+            # Format: 1.234,56 → remove dots, replace comma
+            number_str = number_str.replace('.', '').replace(',', '.')
+        elif ',' in number_str:
+            # Format: 1234,56 → replace comma
+            number_str = number_str.replace(',', '.')
+        # If only dots, could be US decimal or European thousands
+        elif '.' in number_str and len(number_str.split('.')[-1]) == 3:
+            # Probably format: 1.234 → remove dot
+            number_str = number_str.replace('.', '')
+        
+        try:
+            # Try as float
+            result = float(number_str)
+            # If integer without decimals, return int
+            if result.is_integer():
+                return int(result)
+            return result
+        except (ValueError, TypeError):
+            return number_str
+    
+    return number_str
+
+
+def convert_fuel_consumption(value: Any) -> float | str:
+    """Convert fuel consumption from l/100km to km/l with 2 decimals."""
+    if value is None or value == "":
+        return None
+    
+    # If already a number
+    if isinstance(value, (int, float)):
+        num_value = float(value)
+    # If string, convert European format
+    elif isinstance(value, str):
+        # Replace comma with dot for European format
+        value_clean = value.replace(',', '.')
+        try:
+            num_value = float(value_clean)
+        except (ValueError, TypeError):
+            # If cannot convert, return original string
+            return value
+    else:
+        return value
+    
+    # Conversion l/100km → km/l
+    # Realistic consumption: l/100km typically between 3 and 20
+    # km/l typically between 5 and 33
+    if 2 < num_value < 30:  # Probably l/100km
+        num_value = 100 / num_value
+    
+    # Round to 2 decimals
+    return round(num_value, 2)
 
 
 async def async_setup_entry(
@@ -111,10 +180,10 @@ async def async_setup_entry(
             sensors.append(
                 LubeLoggerLatestGasSensor(coordinator, vehicle_id, vehicle_name, vehicle_info)
             )
-        if vehicle.get("next_reminder"):
-            sensors.append(
-                LubeLoggerNextReminderSensor(coordinator, vehicle_id, vehicle_name, vehicle_info)
-            )
+        # ALWAYS create reminder sensor
+        sensors.append(
+            LubeLoggerNextReminderSensor(coordinator, vehicle_id, vehicle_name, vehicle_info)
+        )
 
     async_add_entities(sensors)
 
@@ -194,7 +263,7 @@ class LubeLoggerLatestOdometerSensor(BaseLubeLoggerSensor):
             unique_id_suffix="latest_odometer",
             device_class=SensorDeviceClass.DISTANCE,
             state_class=SensorStateClass.MEASUREMENT,
-            unit="mi",
+            unit="km",
         )
 
     @property
@@ -202,26 +271,30 @@ class LubeLoggerLatestOdometerSensor(BaseLubeLoggerSensor):
         rec = self._record
         if not rec:
             return None
-        # Adjusted odometer endpoint returns the value directly
+        
         if rec.get("adjusted"):
             odometer = rec.get("odometer")
         else:
-            # API returns lowercase 'odometer' field from records
             odometer = rec.get("odometer") or rec.get("Odometer")
         
         if odometer:
-            try:
-                return int(odometer)
-            except (ValueError, TypeError):
-                try:
-                    return float(odometer)
-                except (ValueError, TypeError):
-                    return odometer
+            return convert_european_number(odometer)
         return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        return self._record or None
+        attrs = self._record.copy() if self._record else {}
+        
+        # Add date in readable format
+        if attrs and "date" in attrs:
+            try:
+                dt = parse_date(attrs["date"])
+                if dt:
+                    attrs["formatted_date"] = dt.strftime("%d/%m/%Y")
+            except (ValueError, TypeError):
+                pass
+        
+        return attrs or None
 
 
 class LubeLoggerNextPlanSensor(BaseLubeLoggerSensor):
@@ -251,7 +324,6 @@ class LubeLoggerNextPlanSensor(BaseLubeLoggerSensor):
         if not rec:
             return None
 
-        # API uses dateCreated or dateModified for plan records
         for field in ("dateCreated", "dateModified", "Date", "date"):
             dt = parse_date(rec.get(field))
             if dt:
@@ -260,7 +332,25 @@ class LubeLoggerNextPlanSensor(BaseLubeLoggerSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        return self._record or None
+        attrs = self._record.copy() if self._record else {}
+        
+        # Convert any numbers to European format
+        if attrs and "cost" in attrs:
+            attrs["cost"] = convert_european_number(attrs["cost"])
+        
+        # Add date in readable format
+        date_fields = ["dateCreated", "dateModified", "Date", "date"]
+        for field in date_fields:
+            if field in attrs:
+                try:
+                    dt = parse_date(attrs[field])
+                    if dt:
+                        attrs[f"{field}_formatted"] = dt.strftime("%d/%m/%Y")
+                except (ValueError, TypeError):
+                    pass
+                break
+        
+        return attrs or None
 
 
 class LubeLoggerLatestTaxSensor(BaseLubeLoggerSensor):
@@ -283,7 +373,7 @@ class LubeLoggerLatestTaxSensor(BaseLubeLoggerSensor):
             unique_id_suffix="latest_tax",
             device_class=SensorDeviceClass.MONETARY,
             state_class=None,
-            unit="USD",
+            unit="EUR",
         )
 
     @property
@@ -291,18 +381,29 @@ class LubeLoggerLatestTaxSensor(BaseLubeLoggerSensor):
         rec = self._record
         if not rec:
             return None
-        # API returns lowercase 'cost' field as string
+        
         cost = rec.get("cost") or rec.get("Cost")
         if cost:
-            try:
-                return float(cost)
-            except (ValueError, TypeError):
-                return cost
+            return convert_european_number(cost)
         return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        return self._record or None
+        attrs = self._record.copy() if self._record else {}
+        
+        # Add date in readable format
+        date_fields = ["date", "Date", "taxDate"]
+        for field in date_fields:
+            if field in attrs:
+                try:
+                    dt = parse_date(attrs[field])
+                    if dt:
+                        attrs["formatted_date"] = dt.strftime("%d/%m/%Y")
+                except (ValueError, TypeError):
+                    pass
+                break
+        
+        return attrs or None
 
 
 class LubeLoggerLatestServiceSensor(BaseLubeLoggerSensor):
@@ -332,7 +433,6 @@ class LubeLoggerLatestServiceSensor(BaseLubeLoggerSensor):
         if not rec:
             return None
 
-        # API uses lowercase 'date' field
         for field in ("date", "Date", "ServiceDate"):
             dt = parse_date(rec.get(field))
             if dt:
@@ -341,7 +441,27 @@ class LubeLoggerLatestServiceSensor(BaseLubeLoggerSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        return self._record or None
+        attrs = self._record.copy() if self._record else {}
+        
+        # Convert any costs to European format
+        cost_fields = ["cost", "Cost", "totalCost", "laborCost", "partsCost"]
+        for field in cost_fields:
+            if field in attrs:
+                attrs[field] = convert_european_number(attrs[field])
+        
+        # Add date in readable format
+        date_fields = ["date", "Date", "ServiceDate"]
+        for field in date_fields:
+            if field in attrs:
+                try:
+                    dt = parse_date(attrs[field])
+                    if dt:
+                        attrs["formatted_date"] = dt.strftime("%d/%m/%Y")
+                except (ValueError, TypeError):
+                    pass
+                break
+        
+        return attrs or None
 
 
 class LubeLoggerLatestRepairSensor(BaseLubeLoggerSensor):
@@ -379,7 +499,27 @@ class LubeLoggerLatestRepairSensor(BaseLubeLoggerSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        return self._record or None
+        attrs = self._record.copy() if self._record else {}
+        
+        # Convert any costs to European format
+        cost_fields = ["cost", "Cost", "totalCost", "laborCost", "partsCost"]
+        for field in cost_fields:
+            if field in attrs:
+                attrs[field] = convert_european_number(attrs[field])
+        
+        # Add date in readable format
+        date_fields = ["date", "Date", "RepairDate"]
+        for field in date_fields:
+            if field in attrs:
+                try:
+                    dt = parse_date(attrs[field])
+                    if dt:
+                        attrs["formatted_date"] = dt.strftime("%d/%m/%Y")
+                except (ValueError, TypeError):
+                    pass
+                break
+        
+        return attrs or None
 
 
 class LubeLoggerLatestUpgradeSensor(BaseLubeLoggerSensor):
@@ -417,7 +557,27 @@ class LubeLoggerLatestUpgradeSensor(BaseLubeLoggerSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        return self._record or None
+        attrs = self._record.copy() if self._record else {}
+        
+        # Convert any costs to European format
+        cost_fields = ["cost", "Cost", "totalCost"]
+        for field in cost_fields:
+            if field in attrs:
+                attrs[field] = convert_european_number(attrs[field])
+        
+        # Add date in readable format
+        date_fields = ["date", "Date", "UpgradeDate"]
+        for field in date_fields:
+            if field in attrs:
+                try:
+                    dt = parse_date(attrs[field])
+                    if dt:
+                        attrs["formatted_date"] = dt.strftime("%d/%m/%Y")
+                except (ValueError, TypeError):
+                    pass
+                break
+        
+        return attrs or None
 
 
 class LubeLoggerLatestSupplySensor(BaseLubeLoggerSensor):
@@ -455,7 +615,27 @@ class LubeLoggerLatestSupplySensor(BaseLubeLoggerSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        return self._record or None
+        attrs = self._record.copy() if self._record else {}
+        
+        # Convert any costs to European format
+        cost_fields = ["cost", "Cost", "totalCost", "price"]
+        for field in cost_fields:
+            if field in attrs:
+                attrs[field] = convert_european_number(attrs[field])
+        
+        # Add date in readable format
+        date_fields = ["date", "Date", "SupplyDate"]
+        for field in date_fields:
+            if field in attrs:
+                try:
+                    dt = parse_date(attrs[field])
+                    if dt:
+                        attrs["formatted_date"] = dt.strftime("%d/%m/%Y")
+                except (ValueError, TypeError):
+                    pass
+                break
+        
+        return attrs or None
 
 
 class LubeLoggerLatestGasSensor(BaseLubeLoggerSensor):
@@ -493,7 +673,69 @@ class LubeLoggerLatestGasSensor(BaseLubeLoggerSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        return self._record or None
+        attrs = self._record.copy() if self._record else {}
+        
+        # Convert all numbers to European format
+        numeric_fields = ["cost", "Cost", "price", "quantity", "odometer", "totalCost", "fuelConsumed"]
+        for field in numeric_fields:
+            if field in attrs:
+                attrs[field] = convert_european_number(attrs[field])
+        
+        # FUEL CONSUMPTION - EXPLICIT CONVERSION for fuelEconomy
+        if "fuelEconomy" in attrs:
+            fuel_value = attrs["fuelEconomy"]
+            
+            # If string with comma, convert to float
+            if isinstance(fuel_value, str):
+                fuel_value = fuel_value.replace(',', '.')
+                try:
+                    fuel_value = float(fuel_value)
+                except (ValueError, TypeError):
+                    pass
+            
+            # If number, convert to km/l and round
+            if isinstance(fuel_value, (int, float)) and fuel_value > 0:
+                # Conversion l/100km → km/l (100 / consumption)
+                # Typical consumption: 5.46 l/100km → 100/5.46 ≈ 18.32 km/l
+                fuel_value = 100 / fuel_value
+                fuel_value = round(fuel_value, 2)  # Round to 2 decimals
+            
+            attrs["fuelEconomy"] = fuel_value
+            attrs["fuelEconomy_unit"] = "km/l"
+        
+        # Handle other consumption fields
+        other_consumption_fields = ["consumption", "litersPer100km", "averageConsumption"]
+        for field in other_consumption_fields:
+            if field in attrs:
+                raw_value = attrs[field]
+                if isinstance(raw_value, str):
+                    raw_value = raw_value.replace(',', '.')
+                    try:
+                        raw_value = float(raw_value)
+                    except (ValueError, TypeError):
+                        pass
+                
+                if isinstance(raw_value, (int, float)) and raw_value > 0:
+                    if raw_value < 20:  # Probably l/100km
+                        raw_value = 100 / raw_value
+                    raw_value = round(raw_value, 2)
+                
+                attrs[field] = raw_value
+                attrs[f"{field}_unit"] = "km/l"
+        
+        # Add date in readable format
+        date_fields = ["date", "Date", "FuelDate"]
+        for field in date_fields:
+            if field in attrs:
+                try:
+                    dt = parse_date(attrs[field])
+                    if dt:
+                        attrs["formatted_date"] = dt.strftime("%d/%m/%Y")
+                except (ValueError, TypeError):
+                    pass
+                break
+        
+        return attrs or None
 
 
 class LubeLoggerNextReminderSensor(BaseLubeLoggerSensor):
@@ -518,10 +760,17 @@ class LubeLoggerNextReminderSensor(BaseLubeLoggerSensor):
         )
 
     @property
+    def available(self) -> bool:
+        """Return if sensor is available - always True for reminders."""
+        # Reminder sensor should always be available,
+        # even when there are no active reminders
+        return True
+
+    @property
     def native_value(self) -> datetime | None:
         rec = self._record
         if not rec:
-            return None
+            return None  # No reminders = None value
 
         # API uses dueDate for reminders
         for field in ("dueDate", "DueDate", "Date", "date"):
@@ -532,4 +781,85 @@ class LubeLoggerNextReminderSensor(BaseLubeLoggerSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        return self._record or None
+        if not self._record:
+            # When no reminders, return informative attributes
+            return {
+                "status": "No active reminders",
+                "overdue": False,
+                "reminder_type": "None",
+                "state": "No reminders set"
+            }
+        
+        attrs = self._record.copy()
+        
+        # Convert distances to European format and ensure they are numbers
+        distance_fields = ["dueDistance", "dueOdometer", "distance"]
+        for field in distance_fields:
+            if field in attrs:
+                attrs[field] = convert_european_number(attrs[field])
+        
+        # Add due date in readable format
+        if "dueDate" in attrs:
+            try:
+                dt = parse_date(attrs["dueDate"])
+                if dt:
+                    attrs["due_date_formatted"] = dt.strftime("%d/%m/%Y")
+            except (ValueError, TypeError):
+                pass
+        
+        # Calculate actual reminder status
+        # Convert due_distance to float for comparison
+        due_distance = attrs.get("dueDistance")
+        if due_distance is not None:
+            try:
+                due_distance = float(due_distance) if not isinstance(due_distance, (int, float)) else due_distance
+            except (ValueError, TypeError):
+                due_distance = None
+        
+        # Convert due_days to int for comparison
+        due_days = attrs.get("dueDays")
+        if due_days is not None:
+            try:
+                due_days = int(due_days) if not isinstance(due_days, int) else due_days
+            except (ValueError, TypeError):
+                due_days = None
+        
+        metric = attrs.get("metric", "")
+        urgency = attrs.get("urgency", "")
+        
+        # Determine if overdue
+        is_overdue = False
+        overdue_by = None
+        
+        if urgency == "PastDue":
+            is_overdue = True
+        elif due_distance is not None and due_distance < 0:
+            is_overdue = True
+            overdue_by = f"{-due_distance} km"
+        elif due_days is not None and due_days < 0:
+            is_overdue = True
+            overdue_by = f"{-due_days} days"
+        
+        attrs["overdue"] = is_overdue
+        if overdue_by:
+            attrs["overdue_by"] = overdue_by
+        
+        # Add metric info
+        if "Odometer" in metric:
+            attrs["reminder_type"] = "Odometer"
+            if due_distance is not None:
+                if due_distance < 0:
+                    attrs["state"] = f"Overdue by {-due_distance} km"
+                else:
+                    attrs["state"] = f"In {due_distance} km"
+        elif "Date" in metric:
+            attrs["reminder_type"] = "Date"
+            if due_days is not None:
+                if due_days < 0:
+                    attrs["state"] = f"Overdue by {-due_days} days"
+                else:
+                    attrs["state"] = f"In {due_days} days"
+        else:
+            attrs["reminder_type"] = "Mixed"
+        
+        return attrs
