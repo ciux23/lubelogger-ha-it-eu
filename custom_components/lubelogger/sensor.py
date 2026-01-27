@@ -62,39 +62,81 @@ def parse_date(date_str: str | None) -> datetime | None:
     return None
 
 
-def convert_european_number(number_str: Any) -> float | int | str:
-    """Convert European number format (1.234,56) to Python float/int."""
-    if not number_str:
+def convert_number_string(number_str: Any) -> float | int | str | None:
+    """Convert a number string to a number, handling both European and International formats.
+    
+    European format: 1.234,56 -> 1234.56
+    International format: 1,234.56 -> 1234.56
+    """
+    if number_str is None or number_str == "":
         return None
     
     if isinstance(number_str, (int, float)):
         return number_str
     
     if isinstance(number_str, str):
-       
+        original = number_str
+        # Remove common currency symbols and trim
         number_str = number_str.replace('€', '').replace('$', '').replace('£', '').strip()
         
-        # European format: dot as thousands separator, comma as decimal separator
-        if ',' in number_str and '.' in number_str:
-            # Format: 1.234,56 → remove dots, replace comma
-            number_str = number_str.replace('.', '').replace(',', '.')
-        elif ',' in number_str:
-            # Format: 1234,56 → replace comma
-            number_str = number_str.replace(',', '.')
-        # If there are only dots, they could be US decimals or EU thousands
-        elif '.' in number_str and len(number_str.split('.')[-1]) == 3:
-            # Likely format: 1.234 → remove dot
+        # Helper to check if a part is likely a thousands group (exactly 3 digits)
+        def is_thousands_part(part: str) -> bool:
+            return part.isdigit() and len(part) == 3
+        
+        # Count separators
+        comma_count = number_str.count(',')
+        dot_count = number_str.count('.')
+        
+        # Case 1: Only one type of separator
+        if comma_count == 1 and dot_count == 0:
+            # e.g., "1234,56" or "1,234"
+            parts = number_str.split(',')
+            if len(parts) == 2 and not is_thousands_part(parts[1]):
+                # Single comma with non-3-digit right part -> decimal comma
+                number_str = number_str.replace(',', '.')
+            else:
+                # Could be a thousands comma (e.g., "1,234") -> remove it
+                number_str = number_str.replace(',', '')
+        
+        elif dot_count == 1 and comma_count == 0:
+            # e.g., "1234.56" or "1.234"
+            parts = number_str.split('.')
+            if len(parts) == 2 and not is_thousands_part(parts[1]):
+                # Single dot with non-3-digit right part -> decimal dot, keep as is
+                pass
+            else:
+                # Likely a thousands dot (e.g., "1.234") -> remove it
+                number_str = number_str.replace('.', '')
+        
+        # Case 2: Both separators present (e.g., "1.234,56" or "1,234.56")
+        elif comma_count > 0 and dot_count > 0:
+            last_comma = number_str.rfind(',')
+            last_dot = number_str.rfind('.')
+            
+            # Assume the LAST separator is the decimal point
+            if last_comma > last_dot:
+                # European: last separator is comma -> dot is thousands
+                number_str = number_str.replace('.', '').replace(',', '.')
+            else:
+                # International: last separator is dot -> comma is thousands
+                number_str = number_str.replace(',', '')
+                # Dot remains as decimal
+        
+        # Case 3: Multiple separators of the same type (thousands)
+        elif comma_count > 1:
+            # e.g., "1,234,567"
+            number_str = number_str.replace(',', '')
+        elif dot_count > 1:
+            # e.g., "1.234.567"
             number_str = number_str.replace('.', '')
         
+        # Final conversion
         try:
-            # Try as float
             result = float(number_str)
-            # If it's an integer without decimals, return int
-            if result.is_integer():
-                return int(result)
-            return result
+            return int(result) if result.is_integer() else result
         except (ValueError, TypeError):
-            return number_str
+            # If conversion fails, return the cleaned original string
+            return original.strip()
     
     return number_str
 
@@ -278,7 +320,7 @@ class LubeLoggerLatestOdometerSensor(BaseLubeLoggerSensor):
             odometer = rec.get("odometer") or rec.get("Odometer")
         
         if odometer:
-            return convert_european_number(odometer)
+            return convert_number_string(odometer)  # <-- MODIFICATO QUI
         return None
 
     @property
@@ -336,7 +378,7 @@ class LubeLoggerNextPlanSensor(BaseLubeLoggerSensor):
         
         # Convert any numbers in European format
         if attrs and "cost" in attrs:
-            attrs["cost"] = convert_european_number(attrs["cost"])
+            attrs["cost"] = convert_number_string(attrs["cost"])  # <-- MODIFICATO QUI
         
         # Add the date in a readable format
         date_fields = ["dateCreated", "dateModified", "Date", "date"]
@@ -384,7 +426,7 @@ class LubeLoggerLatestTaxSensor(BaseLubeLoggerSensor):
         
         cost = rec.get("cost") or rec.get("Cost")
         if cost:
-            return convert_european_number(cost)
+            return convert_number_string(cost)  # <-- MODIFICATO QUI
         return None
 
     @property
@@ -447,7 +489,7 @@ class LubeLoggerLatestServiceSensor(BaseLubeLoggerSensor):
         cost_fields = ["cost", "Cost", "totalCost", "laborCost", "partsCost"]
         for field in cost_fields:
             if field in attrs:
-                attrs[field] = convert_european_number(attrs[field])
+                attrs[field] = convert_number_string(attrs[field])  # <-- MODIFICATO QUI
         
         # Add date in readable format
         date_fields = ["date", "Date", "ServiceDate"]
@@ -505,7 +547,7 @@ class LubeLoggerLatestRepairSensor(BaseLubeLoggerSensor):
         cost_fields = ["cost", "Cost", "totalCost", "laborCost", "partsCost"]
         for field in cost_fields:
             if field in attrs:
-                attrs[field] = convert_european_number(attrs[field])
+                attrs[field] = convert_number_string(attrs[field])  # <-- MODIFICATO QUI
         
         # Add date in readable format
         date_fields = ["date", "Date", "RepairDate"]
@@ -563,7 +605,7 @@ class LubeLoggerLatestUpgradeSensor(BaseLubeLoggerSensor):
         cost_fields = ["cost", "Cost", "totalCost"]
         for field in cost_fields:
             if field in attrs:
-                attrs[field] = convert_european_number(attrs[field])
+                attrs[field] = convert_number_string(attrs[field])  # <-- MODIFICATO QUI
         
         # Add date in readable format
         date_fields = ["date", "Date", "UpgradeDate"]
@@ -621,7 +663,7 @@ class LubeLoggerLatestSupplySensor(BaseLubeLoggerSensor):
         cost_fields = ["cost", "Cost", "totalCost", "price"]
         for field in cost_fields:
             if field in attrs:
-                attrs[field] = convert_european_number(attrs[field])
+                attrs[field] = convert_number_string(attrs[field])  # <-- MODIFICATO QUI
         
         # Add date in readable format
         date_fields = ["date", "Date", "SupplyDate"]
@@ -679,7 +721,7 @@ class LubeLoggerLatestGasSensor(BaseLubeLoggerSensor):
         numeric_fields = ["cost", "Cost", "price", "quantity", "odometer", "totalCost", "fuelConsumed"]
         for field in numeric_fields:
             if field in attrs:
-                attrs[field] = convert_european_number(attrs[field])
+                attrs[field] = convert_number_string(attrs[field])  # <-- MODIFICATO QUI
         
         # FUEL CONSUMPTION - EXPLICIT CONVERSION for fuelEconomy
         if "fuelEconomy" in attrs:
@@ -780,7 +822,7 @@ class LubeLoggerNextReminderSensor(BaseLubeLoggerSensor):
         distance_fields = ["dueDistance", "dueOdometer", "distance"]
         for field in distance_fields:
             if field in attrs:
-                attrs[field] = convert_european_number(attrs[field])
+                attrs[field] = convert_number_string(attrs[field])  # <-- MODIFICATO QUI
         
         # Add due date in readable format
         if "dueDate" in attrs:
