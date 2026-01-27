@@ -13,7 +13,6 @@ from .const import (
     API_PLAN,
     API_REMINDER,
     API_REPAIR_RECORD,
-    API_ROOT,
     API_SERVICE_RECORD,
     API_SUPPLY_RECORD,
     API_TAX,
@@ -22,6 +21,53 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def calculate_reminder_priority(reminder: dict[str, Any]) -> tuple:
+    """Calculate priority for reminder sorting.
+    
+    Returns (priority_value, days, distance) where:
+    - Lower priority_value = higher priority
+    - For Date reminders: priority_value = dueDays
+    - For Odometer reminders: priority_value = dueDistance
+    - For Both: use the smaller of the two
+    """
+    # Get values as numbers
+    due_days_str = reminder.get("dueDays", "")
+    due_distance_str = reminder.get("dueDistance", "")
+    
+    try:
+        due_days = int(due_days_str) if due_days_str not in [None, "", "null"] else 999999
+    except (ValueError, TypeError):
+        due_days = 999999
+    
+    try:
+        due_distance = float(due_distance_str) if due_distance_str not in [None, "", "null"] else 999999
+    except (ValueError, TypeError):
+        due_distance = 999999
+    
+    # Get metric type
+    metric = reminder.get("metric", "")
+    
+    # Calculate priority based on metric
+    if "Date" in metric and "Odometer" not in metric:
+        # Pure date reminder
+        priority = due_days if due_days >= 0 else 999999
+    elif "Odometer" in metric and "Date" not in metric:
+        # Pure odometer reminder
+        priority = due_distance if due_distance >= 0 else 999999
+    else:
+        # Both or unknown - use the smaller positive value
+        if due_days >= 0 and due_distance >= 0:
+            priority = min(due_days, due_distance)
+        elif due_days >= 0:
+            priority = due_days
+        elif due_distance >= 0:
+            priority = due_distance
+        else:
+            priority = 999999
+    
+    return (priority, due_days, due_distance)
 
 
 class LubeLoggerClient:
@@ -58,7 +104,6 @@ class LubeLoggerClient:
                 endpoint = f"{API_ADJUSTED_ODOMETER}?vehicleId={vehicle_id}"
                 adjusted = await self._async_request(endpoint)
                 if adjusted and isinstance(adjusted, dict):
-                    # Adjusted odometer returns a single value, wrap it in a record-like dict
                     _LOGGER.debug("Using adjusted odometer for vehicle %s: %s", vehicle_id, adjusted)
                     return {"odometer": adjusted, "adjusted": True}
             except Exception as err:
@@ -254,21 +299,29 @@ class LubeLoggerClient:
         """Get the next upcoming reminder for a vehicle."""
         endpoint = f"{API_REMINDER}?vehicleId={vehicle_id}" if vehicle_id else API_REMINDER
         records = await self._async_request(endpoint)
+        
         if not isinstance(records, list) or not records:
             _LOGGER.debug("No reminders found for vehicle %s", vehicle_id)
             return None
-
-        # Sort by dueDate to get the next one
-        def sort_key(rec: dict[str, Any]) -> Any:
-            date_str = rec.get("dueDate") or rec.get("DueDate") or rec.get("Date") or rec.get("date")
-            if date_str:
-                return date_str
-            return ""
-
-        sorted_records = sorted([r for r in records if sort_key(r)], key=sort_key)
+        
+        # Filter out invalid records
+        valid_records = []
+        for record in records:
+            if isinstance(record, dict) and record:
+                valid_records.append(record)
+        
+        if not valid_records:
+            _LOGGER.debug("No valid reminder records for vehicle %s", vehicle_id)
+            return None
+        
+        # Sort reminders by priority (closest first)
+        sorted_records = sorted(valid_records, key=calculate_reminder_priority)
+        
         if sorted_records:
-            _LOGGER.debug("Next reminder for vehicle %s: %s", vehicle_id, sorted_records[0])
-            return sorted_records[0]
+            next_reminder = sorted_records[0]
+            _LOGGER.debug("Selected next reminder for vehicle %s: %s", vehicle_id, next_reminder)
+            return next_reminder
+        
         return None
 
     async def _async_request(
@@ -300,4 +353,3 @@ class LubeLoggerClient:
         finally:
             if not self._session:
                 await session.close()
-
