@@ -39,10 +39,10 @@ def parse_date(date_str: str | None) -> datetime | None:
 
     # FORMATO EUROPEO PRINCIPALE per server italiano
     formats = [
-        "%d/%m/%Y",           # Formato europeo: "28/02/2027"
-        "%d/%m/%Y %H:%M:%S",  # Europeo con orario
+        "%d/%m/%Y",           # EU format: "28/02/2027"
+        "%d/%m/%Y %H:%M:%S",  # EU format with time
         "%m/%d/%Y",           # US format (fallback)
-        "%m/%d/%Y %H:%M:%S",  # US con orario (fallback)
+        "%m/%d/%Y %H:%M:%S",  # US format with time (fallback)
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%dT%H:%M:%S.%f",
         "%Y-%m-%d %H:%M:%S",
