@@ -24,13 +24,13 @@ Sensors only appear if data exists for that vehicle.
 
 1. Open HACS → Integrations
 2. Click the menu (⋮) → Custom repositories
-3. Add repository: `https://github.com/larry/lubelogger-ha` (Category: Integration)
+3. Add repository: `https://github.com/ciux23/lubelogger-ha-it-eu` (Category: Integration)
 4. Search for "LubeLogger" and install
 5. Restart Home Assistant
 
 ### Manual
 
-1. Copy `custom_components/lubelogger` to your Home Assistant `custom_components` directory
+1. Copy `custom_components/lubelogger-ha-it-eu` to your Home Assistant `custom_components` directory
 2. Restart Home Assistant
 3. Add the integration via Settings → Devices & Services
 
