@@ -1,6 +1,6 @@
 {
-  "domain": "lubelogger_US-EU",
-  "name": "LubeLogger_US-EU",
+  "domain": "lubelogger-ha-it-eu",
+  "name": "lubelogger-ha-it-eu",
   "codeowners": ["@ciux23"],
   "config_flow": true,
   "documentation": "https://github.com/ciux23/lubelogger-ha-it-eu",
